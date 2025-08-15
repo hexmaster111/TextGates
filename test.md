@@ -76,6 +76,13 @@ C_In --->|C_in|addr_1
 addr_1 --->|C_out --- C_in| addr_2 
 addr_2 --->|C_out --- C_in| addr_3
 addr_3 --->|C_out --- C_in| addr_4
+addr_4 --->|C_out|C_Out
+
+
+addr_1 --->|Sum|S_1
+addr_2 --->|Sum|S_2
+addr_3 --->|Sum|S_3
+addr_4 --->|Sum|S_4
 
 %% src_chip_or_wire--->|src_pin---------dst_pin|dst_chip
 
