@@ -68,6 +68,8 @@ typedef enum TGTokKind
     TOK_ident,
 
     TOK_number,
+    // "chip"
+    TOK_chip,
 
     TOK_open_paren,
     TOK_close_paren,
@@ -212,6 +214,11 @@ GIVE_READING_THE_TOKEN_ANOTHER_GO:;
         ret.kind = TOK_number;
         ret.number = parsed_number;
     }
+    else if (AtleastChars(*lex, 4) && (memcmp(lex->now, "chip", 4) == 0))
+    {
+        ret.kind = TOK_chip;
+        read = 4;
+    }
     else if (AtleastChars(*lex, 2) && CHNOW == '/' && CHNXT == '/')
     {
         ret.kind = TOK_single_line_comment;
@@ -264,7 +271,7 @@ GIVE_READING_THE_TOKEN_ANOTHER_GO:;
     lex->now += read;
 
     return ret;
-    
+
 #undef CHNOW
 #undef CHNXT
 }
@@ -283,6 +290,7 @@ void PrintToken(TGToken tok)
     case TOK_cama: puts("cama ','"); break;
     case TOK_equ: puts("equ '='"); break;
     case TOK_semi: puts("semi ';'"); break;
+    case TOK_chip: puts("chip def 'chip'"); break;
     case TOK_end_of_line: puts("end of line '\\n'"); break;
     case TOK_single_line_comment: puts("start of 1 line comment '//'"); break;
     case TOK_multi_line_comment_start: puts("start of multiline comment '/*'"); break;
