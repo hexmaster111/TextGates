@@ -117,12 +117,44 @@ typedef struct TGLexer
 
 // true if there are atleast count chars left in Lexer
 bool AtleastChars(TGLexer l, size_t count) { return l.eof - l.now > count; }
-bool IsNumber(char c) { return c > '0' && c < '9'; }
+bool IsNumber(char c) { return c >= '0' && c < '9'; }
 
-unsigned int ParseNumber(char *start, size_t len)
+#include <math.h>
+
+unsigned int power(int digits)
 {
+    switch (digits)
+    {
+        // clang-format off
+    case  0: return 0; 
+    case  1: return 1; 
+    case  2: return 10; 
+    case  3: return 100; 
+    case  4: return 1000; 
+    case  5: return 10000; 
+    case  6: return 1000000; 
+    case  7: return 10000000; 
+    case  8: return 100000000; 
+    case  9: return 1000000000;
+        // clang-format on
+    }
 
-    return 69420;
+    TODO("THAT NUMBER HAS TOO MANY DIGITS APOLOGIZE !!");
+}
+
+unsigned int ParseNumber(char *start, size_t length)
+{
+    unsigned int res = 0;
+
+    for (size_t i = 0; i < length; i++)
+    {
+        char c = start[i];
+        int v = c - '0';
+        unsigned int pow = power(length - i);
+        res += v * pow;
+    }
+
+    return res;
 }
 
 TGToken NextToken(TGLexer *lex)
@@ -145,26 +177,18 @@ GIVE_READING_THE_TOKEN_ANOTHER_GO:;
         lex->now += 1;
         goto GIVE_READING_THE_TOKEN_ANOTHER_GO;
     }
-    else if (CHNOW == '(')
-        ret.kind = TOK_open_paren;
-    else if (CHNOW == ')')
-        ret.kind = TOK_close_paren;
-    else if (CHNOW == '[')
-        ret.kind = TOK_open_square;
-    else if (CHNOW == ']')
-        ret.kind = TOK_close_square;
-    else if (CHNOW == '{')
-        ret.kind = TOK_open_bracket;
-    else if (CHNOW == '}')
-        ret.kind = TOK_close_bracket;
-    else if (CHNOW == ',')
-        ret.kind = TOK_cama;
-    else if (CHNOW == '=')
-        ret.kind = TOK_equ;
-    else if (CHNOW == ';')
-        ret.kind = TOK_semi;
-    else if (CHNOW == '\n')
-        ret.kind = TOK_end_of_line;
+    // clang-format off
+    else if (CHNOW == '(')  ret.kind = TOK_open_paren;
+    else if (CHNOW == ')')  ret.kind = TOK_close_paren;
+    else if (CHNOW == '[')  ret.kind = TOK_open_square;
+    else if (CHNOW == ']')  ret.kind = TOK_close_square;
+    else if (CHNOW == '{')  ret.kind = TOK_open_bracket;
+    else if (CHNOW == '}')  ret.kind = TOK_close_bracket;
+    else if (CHNOW == ',')  ret.kind = TOK_cama;
+    else if (CHNOW == '=')  ret.kind = TOK_equ;
+    else if (CHNOW == ';')  ret.kind = TOK_semi;
+    else if (CHNOW == '\n') ret.kind = TOK_end_of_line;
+    // clang-format on
     else if (IsNumber(CHNOW))
     {
         char *now = lex->now;
@@ -236,11 +260,13 @@ GIVE_READING_THE_TOKEN_ANOTHER_GO:;
     END_OF_TOKEN_FOUND:;
         ret.ident.len = read = now - lex->now;
     }
-#undef CHNOW
 
     lex->now += read;
 
     return ret;
+    
+#undef CHNOW
+#undef CHNXT
 }
 
 void PrintToken(TGToken tok)
