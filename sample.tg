@@ -1,5 +1,3 @@
-#!TextGates run
-
 /* 
 	built in gates:
 		AND OR NOT XOR NAND NOR
