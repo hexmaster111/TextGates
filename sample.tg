@@ -19,8 +19,8 @@
 */ 
 
 // other comment
-chip simple_wire(I)->(O){I=BUFF(O);}
-chip simple_and_gate (A, B) -> (Q) { Q = A AND B; }
+chip simple_wire(I)->(O){O=BUFF(I);}
+chip simple_and_gate (A, B) -> (Q) { Q = AND(A, B); }
 
 chip _1bit_full_adder (A, B, C_in) -> (C_out, S) {
 	S 	  = (A XOR B) XOR C_in;

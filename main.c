@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #define MAX_CHIP_IO_DEFS (10)
-
+#define MAX_LVALUE_ASSIGNMENTS (10)
 
 #define TODO(WHAT)                                                                 \
     do                                                                             \
@@ -58,20 +58,68 @@ typedef struct ChipIODefList
     ChipIODef items[MAX_CHIP_IO_DEFS];
 } ChipIODefList;
 
-typedef struct LValue
+/*
+Q =
+    AND (   -- EXP_use_chip
+        A,     -- EXP_use_wire
+        B      -- EXP_use_wire
+    )
+    ;
+*/
+
+/*
+C_out =  OR(AND(A,B), AND(C_in, XOR(A,B)))
+
+C_out =
+    OR --use chip
+    (
+        AND --use chip
+        (
+            A, -- use wire
+            B  -- use wire
+        )
+        ,
+        AND -- use chip
+        (
+            C_in -- use wire
+            XOR  -- use chip
+            (
+                A -- use wire
+                B -- use wire
+            )
+        )
+    )
+
+*/
+
+/*
+    O = BUFF -- use chip
+        (
+            I -- use wire
+        )
+*/
+
+struct Expr
 {
+    enum
+    {
+        EXP_use_chip = 1,
+        EXP_use_wire
+    } kind;
+
     Slice name;
-} LValue;
 
-typedef struct ChipStatement
-{
-    LValue assigns_to;
-} ChipStatement;
+    size_t sub_expressions_count;
+    struct Expr *sub_expressions;
+};
 
-typedef struct ChipBody
+typedef struct Expr Expr;
+
+typedef struct ChipStructure
 {
-    ChipStatement statement;
-} ChipBody;
+    Slice assign_to;
+    Expr expression;
+} ChipStructure;
 
 // chip name_of_chip (inputs) -> (outputs)
 typedef struct ChipDef
@@ -80,7 +128,7 @@ typedef struct ChipDef
     ChipIODefList inputs;
     ChipIODefList outputs;
 
-    ChipBody body;
+    ChipStructure structure;
 } ChipDef;
 
 typedef enum TGTokKind
@@ -136,7 +184,6 @@ typedef struct TGLexer
     long line_number;
     bool in_single_line_comment;
     bool in_multi_line_comment;
-
 } TGLexer;
 
 // true if there are atleast count chars left in Lexer
@@ -179,7 +226,7 @@ unsigned int ParseNumber(char *start, size_t length)
     return res;
 }
 
-TGToken NextToken(TGLexer *lex, bool skip_end_of_line)
+TGToken NextToken(TGLexer *lex)
 {
 
 GIVE_READING_THE_TOKEN_ANOTHER_GO:;
@@ -212,8 +259,6 @@ GIVE_READING_THE_TOKEN_ANOTHER_GO:;
     else if (CHNOW == '\n') {
         ret.kind = TOK_end_of_line;
         lex->line_number += 1;
-
-        if(skip_end_of_line) goto GIVE_READING_THE_TOKEN_ANOTHER_GO;
     }
     // clang-format on
     else if (IsNumber(CHNOW))
@@ -295,10 +340,36 @@ GIVE_READING_THE_TOKEN_ANOTHER_GO:;
 
     lex->now += read;
 
-    return ret;
-
 #undef CHNOW
 #undef CHNXT
+
+    // comment skipping
+    if (lex->in_single_line_comment && ret.kind == TOK_end_of_line)
+    {
+        lex->in_single_line_comment = false;
+    }
+    else if (lex->in_multi_line_comment && ret.kind == TOK_multi_line_comment_end)
+    {
+        lex->in_multi_line_comment = false;
+    }
+    else if (ret.kind == TOK_single_line_comment)
+    {
+        lex->in_single_line_comment = true;
+    }
+    else if (ret.kind == TOK_multi_line_comment_start)
+    {
+        lex->in_multi_line_comment = true;
+    }
+
+    if (lex->in_single_line_comment ||
+        lex->in_multi_line_comment ||
+        ret.kind == TOK_multi_line_comment_end ||
+        ret.kind == TOK_end_of_line)
+    {
+        goto GIVE_READING_THE_TOKEN_ANOTHER_GO;
+    }
+
+    return ret;
 }
 
 void PrintToken(TGToken tok)
@@ -332,9 +403,9 @@ void Usage(char *name)
     printf("usage: %s <filename.tg>\n", name);
 }
 
-TGToken ExpectTokenOrFail(TGLexer *l, TGTokKind tok, bool skip_end_of_line)
+TGToken ExpectTokenOrFail(TGLexer *l, TGTokKind tok)
 {
-    TGToken t = NextToken(l, skip_end_of_line);
+    TGToken t = NextToken(l);
     if (t.kind != tok)
     {
         TODO("ERROR: Unexpected token!");
@@ -346,14 +417,14 @@ TGToken ExpectTokenOrFail(TGLexer *l, TGTokKind tok, bool skip_end_of_line)
 // ... ( <ident / ident cama ident / none> ) ...
 ChipIODefList ParseIoDefList(TGLexer *l)
 {
-    ExpectTokenOrFail(l, TOK_open_paren, true);
+    ExpectTokenOrFail(l, TOK_open_paren);
 
     ChipIODefList ret = {0};
     int listidx = 0;
     TGToken tk;
     bool expect_cama = false;
 
-    while ((tk = NextToken(l, true)).kind != TOK_close_paren)
+    while ((tk = NextToken(l)).kind != TOK_close_paren)
     {
 
         if (!expect_cama)
@@ -377,17 +448,40 @@ ChipIODefList ParseIoDefList(TGLexer *l)
     return ret;
 }
 
-ChipBody ParseChipBody(TGLexer *l)
+// everything after the = Something(something, something)
+Expr ParseRhsExpression(TGLexer *l)
 {
-    ExpectTokenOrFail(l, TOK_open_bracket, true);
+    Expr ret = {0};
+    ret.name = ExpectTokenOrFail(l, TOK_ident).ident;
+    ExpectTokenOrFail(l, TOK_open_paren);
+    ret.kind = EXP_use_chip;
 
-    ChipBody ret = {0};
+    ret.sub_expressions_count = 1;
+    ret.sub_expressions = malloc(sizeof(Expr) * ret.sub_expressions_count);
+    memset(ret.sub_expressions, 0, sizeof(Expr) * ret.sub_expressions_count);
 
-    TGToken tk = {0};
-    while ((tk = NextToken(l, true)).kind != TOK_close_bracket)
-    {
-        PrintToken(tk);
-    }
+    ret.sub_expressions[0].kind = EXP_use_wire;
+    ret.sub_expressions[0].name = ExpectTokenOrFail(l, TOK_ident).ident;
+
+    ExpectTokenOrFail(l, TOK_close_paren);
+    ExpectTokenOrFail(l, TOK_semi);
+
+    TODO("im working here yet")
+    return ret;
+}
+
+ChipStructure ParseChipBody(TGLexer *l)
+{
+    ExpectTokenOrFail(l, TOK_open_bracket);
+
+    ChipStructure ret = {0};
+
+    ret.assign_to = ExpectTokenOrFail(l, TOK_ident).ident;
+    ExpectTokenOrFail(l, TOK_equ);
+
+    ret.expression = ParseRhsExpression(l);
+
+    ExpectTokenOrFail(l, TOK_close_bracket);
 
     return ret;
 }
@@ -397,11 +491,11 @@ ChipDef ParseChip(TGLexer *l)
 {
     ChipDef ret = {0};
 
-    ret.name = ExpectTokenOrFail(l, TOK_ident, true).ident;
+    ret.name = ExpectTokenOrFail(l, TOK_ident).ident;
     ret.inputs = ParseIoDefList(l);
-    ExpectTokenOrFail(l, TOK_arrow, true);
+    ExpectTokenOrFail(l, TOK_arrow);
     ret.outputs = ParseIoDefList(l);
-    ret.body = ParseChipBody(l);
+    ret.structure = ParseChipBody(l);
     return ret;
 }
 
@@ -430,28 +524,10 @@ int main(int argc, char *argv[])
     };
 
     TGToken tk;
-    while ((tk = NextToken(&p, false)).kind != TOK_end_of_input)
+    while ((tk = NextToken(&p)).kind != TOK_end_of_input)
     {
-        if (p.in_single_line_comment && tk.kind == TOK_end_of_line)
-        {
-            p.in_single_line_comment = false;
-        }
-        else if (p.in_multi_line_comment && tk.kind == TOK_multi_line_comment_end)
-        {
-            p.in_multi_line_comment = false;
-        }
-        else if (p.in_multi_line_comment || p.in_single_line_comment)
-        {
-        }
-        else if (tk.kind == TOK_single_line_comment)
-        {
-            p.in_single_line_comment = true;
-        }
-        else if (tk.kind == TOK_multi_line_comment_start)
-        {
-            p.in_multi_line_comment = true;
-        }
-        else if (tk.kind == TOK_chip)
+
+        if (tk.kind == TOK_chip)
         {
             ChipDef c = ParseChip(&p);
             printf("chip: %.*s\n", c.name.len, c.name.base);
