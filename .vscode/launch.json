@@ -10,7 +10,7 @@
             "preLaunchTask": "build",
             "request": "launch",
             "program": "${workspaceFolder}/tg",
-            "args": [],
+            "args": ["sample.tg"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
