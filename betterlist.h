@@ -78,9 +78,8 @@
     {                                                                             \
         assert(idx < list->count);                                                \
         return &list->items[idx];                                                 \
-    }                                                                             \
-    TYPE *TYPE##_ListAtRef(ListOf##TYPE *list, size_t idx)                        \
-    {                                                                             \
-        assert(idx < list->count);                                                \
-        return &list->items[idx];                                                 \
     }
+
+
+
+    

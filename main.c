@@ -43,13 +43,17 @@ char *ReadEntireFile(const char *fpath, long *len)
     return buffer;
 }
 
-
-
 typedef struct Slice
 {
     char *base;
     int len;
 } Slice;
+
+#define SLICE_CSTR(CSTR) \
+    (Slice) { .len = sizeof((CSTR)), .base = (CSTR) }
+
+ListDef(Slice);
+ListImpl(Slice);
 
 typedef struct ChipIODef
 {
@@ -57,51 +61,12 @@ typedef struct ChipIODef
     // todo: input_array_size?
 } ChipIODef;
 
-typedef struct ChipIODefList
-{
-    ChipIODef items[MAX_CHIP_IO_DEFS + 1]; // last is null for end of list
-} ChipIODefList;
+ListDef(ChipIODef);
+ListImpl(ChipIODef);
 
-/*
-Q =
-    AND (   -- EXP_use_chip
-        A,     -- EXP_use_wire
-        B      -- EXP_use_wire
-    )
-    ;
-*/
+typedef struct Expr Expr;
 
-/*
-C_out =  OR(AND(A,B), AND(C_in, XOR(A,B)))
-
-C_out =
-    OR --use chip
-    (
-        AND --use chip
-        (
-            A, -- use wire
-            B  -- use wire
-        )
-        ,
-        AND -- use chip
-        (
-            C_in -- use wire
-            XOR  -- use chip
-            (
-                A -- use wire
-                B -- use wire
-            )
-        )
-    )
-
-*/
-
-/*
-    O = BUFF -- use chip
-        (
-            I -- use wire
-        )
-*/
+ListDef(Expr);
 
 struct Expr
 {
@@ -110,66 +75,48 @@ struct Expr
         EXP_use_chip = 1,
         EXP_use_wire
     } kind;
-
     Slice name;
-
-    size_t sub_expressions_count;
-    struct Expr *sub_expressions;
+    ListOfExpr sub_expressions;
 };
 
-typedef struct Expr Expr;
+ListImpl(Expr);
 
-typedef struct ChipStructure
+typedef struct Assign
 {
     Slice assign_to;
     Expr expression;
+} Assign;
+
+ListDef(Assign);
+ListImpl(Assign);
+
+typedef struct ChipStructure
+{
+    ListOfAssign assignments;
 } ChipStructure;
 
 // chip name_of_chip (inputs) -> (outputs)
 typedef struct ChipDef
 {
     Slice name;
-    ChipIODefList inputs;
-    ChipIODefList outputs;
+    ListOfChipIODef inputs;
+    ListOfChipIODef outputs;
 
     ChipStructure structure;
 } ChipDef;
 
-void PrintIoList(ChipIODefList l)
+void PrintIoList(ListOfChipIODef l)
 {
-    ChipIODef d;
-    int i = 0;
-
-    while ((d = l.items[i]).name.base != NULL)
+    for (int i = 0; i < ChipIODef_ListLength(&l); i++)
     {
+        ChipIODef d = *ChipIODef_ListAt(&l, i);
         printf("%.*s", d.name.len, d.name.base);
-        i += 1;
-        if (l.items[i].name.base != NULL)
-            putchar(',');
-    }
-}
 
-void PrintExpression(Expr *e)
-{
-    switch (e->kind)
-    {
-    case EXP_use_wire:
-        printf("%.*s", e->name.len, e->name.base);
-        break;
-    case EXP_use_chip:
-        printf("%.*s (", e->name.len, e->name.base);
-        if (e->sub_expressions)
-            PrintExpression(e->sub_expressions);
-        putchar(')');
-        break;
+        if (i < ChipIODef_ListLength(&l) - 1)
+        {
+            printf(",");
+        }
     }
-}
-
-void PrintChipStructure(ChipStructure s)
-{
-    printf("%.*s = ", s.assign_to.len, s.assign_to.base);
-    PrintExpression(&s.expression);
-    putchar(';');
 }
 
 void PrintChip(ChipDef ch)
@@ -182,7 +129,7 @@ void PrintChip(ChipDef ch)
     putchar('(');
     PrintIoList(ch.outputs);
     printf(") {");
-    PrintChipStructure(ch.structure);
+    // PrintChipStructure(ch.structure);
     printf("}\n");
 }
 
@@ -427,10 +374,20 @@ GIVE_READING_THE_TOKEN_ANOTHER_GO:;
     return ret;
 }
 
+TGToken PeekToken(TGLexer *l)
+{
+    TGLexer bck = *l;
+    TGToken token = NextToken(l);
+    *l = bck;
+
+    return token;
+}
+
 void PrintToken(TGToken tok)
 {
     // clang-format off
     switch(tok.kind) {
+    case 0: puts("undefined token"); break;
     case TOK_ident:  printf("ident '%.*s'\n", tok.ident.len, tok.ident.base); break;
     case TOK_open_paren: puts("open paren '('"); break;
     case TOK_close_paren: puts("close paren ')'"); break;
@@ -470,12 +427,11 @@ TGToken ExpectTokenOrFail(TGLexer *l, TGTokKind tok)
 }
 
 // ... ( <ident / ident cama ident / none> ) ...
-ChipIODefList ParseIoDefList(TGLexer *l)
+ListOfChipIODef ParseIoDefList(TGLexer *l)
 {
     ExpectTokenOrFail(l, TOK_open_paren);
 
-    ChipIODefList ret = {0};
-    int listidx = 0;
+    ListOfChipIODef ret = {0};
     TGToken tk;
     bool expect_cama = false;
 
@@ -486,10 +442,8 @@ ChipIODefList ParseIoDefList(TGLexer *l)
         {
             if (tk.kind != TOK_ident)
                 TODO("ERROR: Expected Identifer");
-            ret.items[listidx].name = tk.ident;
-            listidx += 1;
+            ChipIODef_ListPush(&ret, (ChipIODef){.name = tk.ident});
             expect_cama = true;
-            // PrintToken(tk);
         }
         else
         {
@@ -503,40 +457,61 @@ ChipIODefList ParseIoDefList(TGLexer *l)
     return ret;
 }
 
-// everything after the = Something(something, something)
-Expr ParseRhsExpression(TGLexer *l)
+Expr ParseExpr(TGLexer *l)
 {
-    Expr ret = {0};
-    ret.name = ExpectTokenOrFail(l, TOK_ident).ident;
-    ExpectTokenOrFail(l, TOK_open_paren);
-    ret.kind = EXP_use_chip;
+    // SUB_EXPR use_chip: <IDENT><OPEN_PAREN> <SUB_EXPR> <CLOSE_PAREN>
+    // SUB_EXPR use_wire: <IDENT>
+    // END_EXPR: <SEMI>
 
-    ret.sub_expressions_count = 1;
-    ret.sub_expressions = malloc(sizeof(Expr) * ret.sub_expressions_count);
-    memset(ret.sub_expressions, 0, sizeof(Expr) * ret.sub_expressions_count);
+    TGToken now = NextToken(l);
+    TGToken nxt = PeekToken(l);
 
-    ret.sub_expressions[0].kind = EXP_use_wire;
-    ret.sub_expressions[0].name = ExpectTokenOrFail(l, TOK_ident).ident;
+    if (now.kind == TOK_ident && nxt.kind == TOK_open_paren)
+    {
+        ExpectTokenOrFail(l, TOK_open_paren); // consume the peeked open paren
+        Expr chip_usage = {.kind = EXP_use_chip, .name = now.ident};
 
-    ExpectTokenOrFail(l, TOK_close_paren);
-    ExpectTokenOrFail(l, TOK_semi);
+        
 
-    // TODO("im working here yet")
+        // while (l.token.kind != close_paren) { parse sub expression }
+
+        // some how, we should be making a list of expressions in an assignment?
+        // no, we should be making a list of assignements with a single expression in the assignemtn... OH
+
+        TODO("I was working here...");
+
+        int x = 0;
+        // chip usage
+    }
+    else if (now.kind == TOK_ident)
+    {
+        int x = 0;
+    }
+
+    TODO("ERROR: Unexpected Token!");
+}
+
+// <IDENT> <EQU>    <--- Q = <expr>
+Assign ParseAssign(TGLexer *l)
+{
+    Assign ret = {0};
+    ret.assign_to = ExpectTokenOrFail(l, TOK_ident).ident;
+    ExpectTokenOrFail(l, TOK_equ);
+    ret.expression = ParseExpr(l);
     return ret;
 }
 
 ChipStructure ParseChipBody(TGLexer *l)
 {
+    ChipStructure ret = {0};
     ExpectTokenOrFail(l, TOK_open_bracket);
 
-    ChipStructure ret = {0};
-
-    ret.assign_to = ExpectTokenOrFail(l, TOK_ident).ident;
-    ExpectTokenOrFail(l, TOK_equ);
-
-    ret.expression = ParseRhsExpression(l);
-
-    ExpectTokenOrFail(l, TOK_close_bracket);
+    TGToken now = {0};
+    do
+    {
+        PrintToken(now);
+        Assign_ListPush(&ret.assignments, ParseAssign(l));
+    } while ((now = NextToken(l)).kind != TOK_close_bracket);
 
     return ret;
 }
