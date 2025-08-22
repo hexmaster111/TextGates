@@ -8,6 +8,8 @@
 #define MAX_CHIP_IO_DEFS (10)
 #define MAX_LVALUE_ASSIGNMENTS (10)
 
+#include "betterlist.h"
+
 #define TODO(WHAT)                                                                 \
     do                                                                             \
     {                                                                              \
@@ -41,6 +43,8 @@ char *ReadEntireFile(const char *fpath, long *len)
     return buffer;
 }
 
+
+
 typedef struct Slice
 {
     char *base;
@@ -55,7 +59,7 @@ typedef struct ChipIODef
 
 typedef struct ChipIODefList
 {
-    ChipIODef items[MAX_CHIP_IO_DEFS];
+    ChipIODef items[MAX_CHIP_IO_DEFS + 1]; // last is null for end of list
 } ChipIODefList;
 
 /*
@@ -130,6 +134,57 @@ typedef struct ChipDef
 
     ChipStructure structure;
 } ChipDef;
+
+void PrintIoList(ChipIODefList l)
+{
+    ChipIODef d;
+    int i = 0;
+
+    while ((d = l.items[i]).name.base != NULL)
+    {
+        printf("%.*s", d.name.len, d.name.base);
+        i += 1;
+        if (l.items[i].name.base != NULL)
+            putchar(',');
+    }
+}
+
+void PrintExpression(Expr *e)
+{
+    switch (e->kind)
+    {
+    case EXP_use_wire:
+        printf("%.*s", e->name.len, e->name.base);
+        break;
+    case EXP_use_chip:
+        printf("%.*s (", e->name.len, e->name.base);
+        if (e->sub_expressions)
+            PrintExpression(e->sub_expressions);
+        putchar(')');
+        break;
+    }
+}
+
+void PrintChipStructure(ChipStructure s)
+{
+    printf("%.*s = ", s.assign_to.len, s.assign_to.base);
+    PrintExpression(&s.expression);
+    putchar(';');
+}
+
+void PrintChip(ChipDef ch)
+{
+    printf("chip %.*s", ch.name.len, ch.name.base);
+    putchar('(');
+    PrintIoList(ch.inputs);
+    putchar(')');
+    printf("->");
+    putchar('(');
+    PrintIoList(ch.outputs);
+    printf(") {");
+    PrintChipStructure(ch.structure);
+    printf("}\n");
+}
 
 typedef enum TGTokKind
 {
@@ -466,7 +521,7 @@ Expr ParseRhsExpression(TGLexer *l)
     ExpectTokenOrFail(l, TOK_close_paren);
     ExpectTokenOrFail(l, TOK_semi);
 
-    TODO("im working here yet")
+    // TODO("im working here yet")
     return ret;
 }
 
@@ -530,7 +585,7 @@ int main(int argc, char *argv[])
         if (tk.kind == TOK_chip)
         {
             ChipDef c = ParseChip(&p);
-            printf("chip: %.*s\n", c.name.len, c.name.base);
+            PrintChip(c);
         }
         else if (tk.kind == TOK_end_of_line)
         {
