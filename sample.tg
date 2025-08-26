@@ -19,14 +19,17 @@
 */ 
 
 // other comment
-chip buffer(I,T)->(O){O=BUFF(I);}
+
+chip buffer(I,T)->(O){O = BUFF(I);}
+
+/*
 chip simple_and_gate (A, B) -> (Q) { Q = AND(A, B); }
 
 chip _1bit_full_adder (A, B, C_in) -> (C_out, S) {
 	S 	  = (A XOR B) XOR C_in;
 	C_out = (A AND B) OR ( C_in AND ( A XOR B));
 }
-
+*/
 
 
 /*

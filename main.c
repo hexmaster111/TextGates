@@ -135,6 +135,7 @@ void PrintChip(ChipDef ch)
 
 typedef enum TGTokKind
 {
+    TOK_undefined = 0,
     // name of something
     TOK_ident = 1,
 
@@ -192,7 +193,7 @@ typedef struct TGLexer
 bool AtleastChars(TGLexer l, size_t count) { return l.eof - l.now > count; }
 bool IsNumber(char c) { return c >= '0' && c < '9'; }
 
-unsigned int Power(int digits)
+unsigned int DigietPowerOf10(int digits)
 {
     switch (digits)
     {
@@ -221,7 +222,7 @@ unsigned int ParseNumber(char *start, size_t length)
     {
         char c = start[i];
         int v = c - '0';
-        unsigned int pow = Power(length - i);
+        unsigned int pow = DigietPowerOf10(length - i);
         res += v * pow;
     }
 
@@ -387,7 +388,7 @@ void PrintToken(TGToken tok)
 {
     // clang-format off
     switch(tok.kind) {
-    case 0: puts("undefined token"); break;
+    case TOK_undefined: puts("undefined token"); break;
     case TOK_ident:  printf("ident '%.*s'\n", tok.ident.len, tok.ident.base); break;
     case TOK_open_paren: puts("open paren '('"); break;
     case TOK_close_paren: puts("close paren ')'"); break;
@@ -471,21 +472,24 @@ Expr ParseExpr(TGLexer *l)
         ExpectTokenOrFail(l, TOK_open_paren); // consume the peeked open paren
         Expr chip_usage = {.kind = EXP_use_chip, .name = now.ident};
 
-        
+        do
+        {
+            Expr_ListPush(&chip_usage.sub_expressions, ParseExpr(l));
+            now = PeekToken(l);
+        } while (now.kind != TOK_close_paren);
 
-        // while (l.token.kind != close_paren) { parse sub expression }
+        ExpectTokenOrFail(l, TOK_close_paren); // eat NXT that was peeked
+
+        // while (l.token.kind != close_paren) { parse sub expression, expect cama or close_paren }
 
         // some how, we should be making a list of expressions in an assignment?
         // no, we should be making a list of assignements with a single expression in the assignemtn... OH
 
-        TODO("I was working here...");
-
-        int x = 0;
-        // chip usage
+        return chip_usage;
     }
     else if (now.kind == TOK_ident)
     {
-        int x = 0;
+        return (Expr){.kind = EXP_use_wire, .name = now.ident, .sub_expressions = {0}};
     }
 
     TODO("ERROR: Unexpected Token!");
@@ -498,6 +502,9 @@ Assign ParseAssign(TGLexer *l)
     ret.assign_to = ExpectTokenOrFail(l, TOK_ident).ident;
     ExpectTokenOrFail(l, TOK_equ);
     ret.expression = ParseExpr(l);
+
+    ExpectTokenOrFail(l, TOK_semi);
+    
     return ret;
 }
 
